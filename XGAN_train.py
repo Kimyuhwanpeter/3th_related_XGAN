@@ -68,20 +68,38 @@ def mae_criterion(in_, target):
 def sce_criterion(logits, labels):
     return tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels))
 
-def cal_loss(g_model, A_de_model, B_de_model, A_images, B_images):
+def cal_loss(en_domain_A,
+             en_domain_B, 
+             de_domain_A,
+             de_domain_B,
+             Cdann, A_de_model, B_de_model, A_images, B_images):
 
     with tf.GradientTape(persistent=True) as g_tape, tf.GradientTape(persistent=True) as d_tape:
 
-        reconstruct_A, \
-        reconstruct_B, \
-        cdann_A, \
-        cdann_B, \
-        embedding_A, \
-        embedding_B, \
-        embedding_fake_A, \
-        embedding_fake_B, \
-        fake_A, \
-        fake_B = g_model([A_images, B_images], True)
+        # Encoder output
+        embedding_A = en_domain_A(A_images, True) # 또 잘못짯나?
+        embedding_B = en_domain_B(B_images, True)
+
+        # Reconstruction output
+        # A->encoderA->decoderA
+        # B->encoderB->decoderB
+        reconstruct_A = de_domain_A(embedding_A, True)
+        reconstruct_B = de_domain_B(embedding_B, True)
+
+        # Cdann output
+        cdann_A = Cdann(embedding_A, True)
+        cdann_B = Cdann(embedding_B, True)
+
+        # Generator output
+        # B->encoderB->decoderA
+        # A->encoderA->decoderB
+        fake_A = de_domain_A(embedding_B, True)
+        fake_B = de_domain_B(embedding_A, True)
+
+        # Fake image encoder output
+        embedding_fake_A = en_domain_A(fake_A, True)
+        embedding_fake_B = en_domain_B(fake_B, True)
+
 
         # Discrim output
         discriminate_real_A = A_de_model(A_images, True)
@@ -122,10 +140,15 @@ def cal_loss(g_model, A_de_model, B_de_model, A_images, B_images):
         # Total loss
         dis_loss = dis_gan_loss
 
-    g_grads = g_tape.gradient(gen_loss, g_model.trainable_variables)
+    g_grads1 = g_tape.gradient(gen_loss, en_domain_A.trainable_variables + en_domain_B.trainable_variables)
+    g_grads2 = g_tape.gradient(gen_loss, de_domain_A.trainable_variables + de_domain_B.trainable_variables)
+    g_grads3 = g_tape.gradient(gen_loss, Cdann.trainable_variables)
+
     d_grads = d_tape.gradient(dis_loss, A_de_model.trainable_variables + B_de_model.trainable_variables)
 
-    g_optim.apply_gradients(zip(g_grads, g_model.trainable_variables))
+    g_optim.apply_gradients(zip(g_grads1, en_domain_A.trainable_variables + en_domain_B.trainable_variables))
+    g_optim.apply_gradients(zip(g_grads2, de_domain_A.trainable_variables + de_domain_B.trainable_variables))
+    g_optim.apply_gradients(zip(g_grads3, Cdann.trainable_variables))
     d_optim.apply_gradients(zip(d_grads, A_de_model.trainable_variables + B_de_model.trainable_variables))
 
 
@@ -133,15 +156,25 @@ def cal_loss(g_model, A_de_model, B_de_model, A_images, B_images):
 
 def main():
 
-    ge_model = XGAN(input_shape=(FLAGS.img_size, FLAGS.img_size, 3))
+    en_domain_A = encoder(input_shape=(FLAGS.img_size, FLAGS.img_size, 3))
+    en_domain_B = encoder(input_shape=(FLAGS.img_size, FLAGS.img_size, 3))
+    de_domain_A = decoder(input_shape=(1, 1, 1024))
+    de_domain_B = decoder(input_shape=(1, 1, 1024))
+
+    Cdann = cdann(input_shape=(1, 1, 1024))
+
     A_de_model = discriminator(input_shape=(FLAGS.img_size, FLAGS.img_size, 3))
     B_de_model = discriminator(input_shape=(FLAGS.img_size, FLAGS.img_size, 3))
-    ge_model.summary()
+
+    en_domain_A.summary()
+    de_domain_A.summary()
+    Cdann.summary()
     A_de_model.summary()
     B_de_model.summary()
 
+
     if FLAGS.pre_checkpoint:
-        ckpt = tf.train.Checkpoint(ge_model=ge_model, A_de_model=A_de_model, B_de_model=B_de_model,
+        ckpt = tf.train.Checkpoint(A_ge_model=A_ge_model, B_ge_model=B_ge_model, A_de_model=A_de_model, B_de_model=B_de_model,
                                    g_optim=g_optim, d_optim=d_optim)
         ckpt_manager = tf.train.CheckpointManager(ckpt, FLAGS.pre_checkpoint_path, 5)
 
@@ -174,12 +207,23 @@ def main():
             A_images, B_images = next(tr_iter)
             a = 0
 
-            g_loss, d_loss = cal_loss(ge_model, A_de_model, B_de_model, A_images, B_images)
+            g_loss, d_loss = cal_loss(en_domain_A,
+                                      en_domain_B, 
+                                      de_domain_A,
+                                      de_domain_B,
+                                      Cdann,
+                                      A_de_model, 
+                                      B_de_model, 
+                                      A_images, B_images)
 
             if count % 100 == 0:
                 print("Epochs: {} g_loss = {} d_loss = {} [{}/{}]".format(epoch, g_loss, d_loss, step + 1, tr_idx))
 
-                _, _, _, _, _, _, _, _, fake_A, fake_B = ge_model([A_images, B_images], False)
+                embedding_A = en_domain_A(A_images, False)
+                embedding_B = en_domain_B(B_images, False)
+
+                fake_A = de_domain_A(embedding_B, False)
+                fake_B = de_domain_B(embedding_A, False)
                 plt.imsave(FLAGS.sample_images + "/" + "{}_1_A_real.png".format(count), A_images[0].numpy() * 0.5 + 0.5)
                 plt.imsave(FLAGS.sample_images + "/" + "{}_2_A_real.png".format(count), A_images[1].numpy() * 0.5 + 0.5)
                 plt.imsave(FLAGS.sample_images + "/" + "{}_3_A_real.png".format(count), A_images[2].numpy() * 0.5 + 0.5)

@@ -2,7 +2,7 @@
 from tensorflow.python.framework import ops
 
 import tensorflow as tf
-
+# https://github.com/CS2470FinalProject/X-GAN/blob/master/model.py
 class FlipGradientBuilder(object):
     def __init__(self):
         self.num_calls = 0
@@ -55,10 +55,12 @@ def deconv2d(x, filters, kernel_size=4, strides=2):
     return tf.keras.layers.Conv2DTranspose(filters=filters, kernel_size=kernel_size, strides=strides,
                                            padding="same")(x)
 
-def encoder(x, filters=32):
+def encoder(input_shape=(64, 64, 3), filters=32):
+    # [-1, 64, 64, 3]
+    h = inputs = tf.keras.Input(input_shape)
 
     ################## encoder ##################
-    h = InstanceNormalization()(conv2d(x, filters=filters))
+    h = InstanceNormalization()(conv2d(h, filters=filters))
     h = tf.keras.layers.LeakyReLU()(h)
     h = InstanceNormalization()(conv2d(h, filters=filters*2))
     h = tf.keras.layers.LeakyReLU()(h)
@@ -75,11 +77,13 @@ def encoder(x, filters=32):
     h = tf.keras.layers.LeakyReLU()(h)
     #####################################################
     
-    return h
+    return tf.keras.Model(inputs=inputs, outputs=h)
 
-def decoder(x, filters=64):
+def decoder(input_shape=(1, 1, 1024), filters=64):
+    # [-1, 1, 1, 1024]
+    h = inputs = tf.keras.Input(input_shape)
 
-    h = InstanceNormalization()(deconv2d(x, filters=filters*8, strides=4))
+    h = InstanceNormalization()(deconv2d(h, filters=filters*8, strides=4))
     h = tf.keras.layers.ReLU()(h)
     h = InstanceNormalization()(deconv2d(h, filters=filters*4))
     h = tf.keras.layers.ReLU()(h)
@@ -91,11 +95,13 @@ def decoder(x, filters=64):
     h = deconv2d(h, filters=3)
     h = tf.nn.tanh(h)
 
-    return h
+    return tf.keras.Model(inputs=inputs, outputs=h)
 
-def cdann(input):
-    
-    fg = flip_gradient(input)
+def cdann(input_shape=(1, 1, 1024)):
+    # [-1, 1, 1, 1024]
+    h = inputs = tf.keras.Input(input_shape)
+
+    fg = flip_gradient(h)
     c1 = conv2d(fg, filters=1024, kernel_size=1, strides=1, padding="valid")
     c1 = tf.keras.layers.LeakyReLU()(c1)
     # c1 is (batch_size x 1 x 1 x 1024)
@@ -108,10 +114,11 @@ def cdann(input):
     c4 = conv2d(fg, filters=1, kernel_size=1, strides=1, padding="valid")
     # c4 is (batch_size x 1 x 1 x 1)
 
-    return c4
+    return tf.keras.Model(inputs=inputs, outputs=c4)
 
-def XGAN(input_shape=(64, 64, 3)):  # ¸ğµ¨À» µ¶¸³ÀûÀ¸·Î ¸¸µé¾î¾ßÇÔ
-
+def XGAN(input_shape=(64, 64, 3)):  # ëª¨ë¸ì„ ë…ë¦½ì ìœ¼ë¡œ ë§Œë“¤ì–´ì•¼í•¨
+    # ëª¨ë¸ì„ ê°ê° ë‚˜ëˆ„ì–´ì•¼í•˜ë‚˜? ê·¸ëŸ¬ë©´ gradient updateë„ ê°ê° í•´ì£¼ì–´ì•¼í•¨!!! ì½”ë“œëŠ” ê¸¸ì–´ì§€ê² ì§€ë§Œ ì´ë°©ë²•ì´ ì¢‹ì•„ë³´ì„
+    # encoderì™€ decoderë§Œ êµ¬ì„±!?!?!?!?
     A = A_inputs = tf.keras.Input(input_shape)
     B = B_inputs = tf.keras.Input(input_shape)
 
@@ -147,6 +154,7 @@ def XGAN(input_shape=(64, 64, 3)):  # ¸ğµ¨À» µ¶¸³ÀûÀ¸·Î ¸¸µé¾î¾ßÇÔ
                                                                 embedding_fake_B,
                                                                 fake_A,
                                                                 fake_B])
+
 
 def discriminator(input_shape=(64, 64, 3), filters=16):
 

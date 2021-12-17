@@ -174,7 +174,10 @@ def main():
 
 
     if FLAGS.pre_checkpoint:
-        ckpt = tf.train.Checkpoint(A_ge_model=A_ge_model, B_ge_model=B_ge_model, A_de_model=A_de_model, B_de_model=B_de_model,
+        ckpt = tf.train.Checkpoint(en_domain_A=en_domain_A, en_domain_B=en_domain_B, 
+                                   de_domain_A=de_domain_A, de_domain_B=de_domain_B,
+                                   A_de_model=A_de_model, B_de_model=B_de_model,
+                                   Cdann=Cdann,
                                    g_optim=g_optim, d_optim=d_optim)
         ckpt_manager = tf.train.CheckpointManager(ckpt, FLAGS.pre_checkpoint_path, 5)
 
@@ -238,6 +241,20 @@ def main():
                 plt.imsave(FLAGS.sample_images + "/" + "{}_2_B_fake.png".format(count), fake_B[1].numpy() * 0.5 + 0.5)
                 plt.imsave(FLAGS.sample_images + "/" + "{}_3_B_fake.png".format(count), fake_B[2].numpy() * 0.5 + 0.5)
 
+            if count % 1000 == 0:
+                model_dir = FLAGS.save_checkpoint
+                folder_name = int(count/1000)
+                folder_neme_str = '%s/%s' % (model_dir, folder_name)
+                if not os.path.isdir(folder_neme_str):
+                    print("Make {} folder to save checkpoint".format(folder_name))
+                    os.makedirs(folder_neme_str)
+                checkpoint = tf.train.Checkpoint(en_domain_A=en_domain_A, en_domain_B=en_domain_B, 
+                                   de_domain_A=de_domain_A, de_domain_B=de_domain_B,
+                                   A_de_model=A_de_model, B_de_model=B_de_model,
+                                   Cdann=Cdann,
+                                   g_optim=g_optim, d_optim=d_optim)
+                checkpoint_dir = folder_neme_str + "/" + "XGAN_model_{}_steps.ckpt".format(count + 1)
+                checkpoint.save(checkpoint_dir)
 
 
             count += 1
